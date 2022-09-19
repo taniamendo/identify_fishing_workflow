@@ -10,13 +10,9 @@ editor_options:
 #Libraries
 
 ```{r libraries, include=FALSE,eval = FALSE}
+library(pacman)
 
-
-library(tidyverse)
-library(leaflet)
-library(leaflet.extras)
-library(viridis)
-library(sf)
+p_load(tidyverse, leaflet, leaflet.extras, viridis, sf, data.table, spatstat.utils)
 
 ```
 
@@ -146,7 +142,7 @@ df2$speed<-df2$dist/df2$dt*1.943
 df2<- df2%>% rowid_to_column("seq") 
 
 #loop to remove erroneous speeds
-
+  ##### can't get it to work####
 repeat { 
   subset<-df2%>%
     filter(speed>speed_filter)
@@ -179,11 +175,11 @@ df2$speed<-df2$dist/df2$dt*1.943
 
 Cut track data into potential trips. Again for this step, knowledge on the fishery is required, and we suggest three potential approaches to define a trip:
 
-1) Based on daily patterns of fishing. In some fisheries, trips are conducted only during daytime. In this case it might be worth "cutting" the track data at midnight to separate the different trips. 
+1) Based on daily patterns of fishing. In some fisheries, trips are conducted only during daytime. In this case it might be worth "cutting" the track data at midnight to separate the different trips.
 
 2) Based on leaving and entering specific harbours/ports/jetties. If you have a list of these, you can create a spatial buffer (metres) around them and identify when the vessel is leaving and entering this buffer each time. Points located outside a buffer in between points inside a buffer define a specific trip.If you dont have a comprehevensive list, then cluster analysis to define possible harbours. Sometimes we might not have all information on harbours, or jetties used by small-scale fishers. In this case, XXX Anna
 
-3) Logbook data: Jonathan?
+3) Logbook data: If logbook data is available, with start and end date-times, these can be used to define a trip, and cut off all points in harbor (depending on precision of logbook data). This is done by selecting gps position times that are within the reported trip times. 
 
 ```{r define trips, include=FALSE,eval = FALSE}
 
@@ -192,10 +188,37 @@ Cut track data into potential trips. Again for this step, knowledge on the fishe
 df2$date<-as.Date(format(as.POSIXct(df2$time_stamp), "%Y-%m-%d"))
 df2$trip_id<-paste(df2$device_id,df2$date)
 
-#2) With harbour list - either dinfe harbours with clusters or you already have a list of harbours
+#2) With harbour list - either define harbours with clusters or you already have a list of harbours
 
  
-#  
+#3) use logbook data as source for trip definition 
+book <- read.csv("log_data.csv")
+
+setDT(df2)
+setDT(book)
+
+#unique trip start and end, with times... (maybe cases for NA needs handling ?)
+trips <- book[ ,. (id = unique(log_book_nr)),
+               by = .(device_id, trip_start, trip_end)]
+
+#use only vessels where we have gps data 
+trips <- trips[trips$device_id %in% df2$device_id, ]
+
+#some formatting for "foverlaps", no duplicate columns allowed, but start and end both set to postime
+df2$start <- df2$time_stamp
+df2$end <- df2$time_stamp
+
+setkey(df2, device_id, start, end)
+setkey(trips, device_id, trip_start, trip_end)
+
+## use the foverlaps function to determine where the times overlaps/ where there is sailing
+df2 <- foverlaps(df2, trips)
+
+# sailing occurs when trip start is not NA/ when an overlap was found
+df2 <- df2[! is.na(df2$trip_start), ]
+
+df2$trip_id <- paste0(df2$device_id, df2$id)
+
 ```
 
 #6. Delete observations "in port"
@@ -208,8 +231,6 @@ If you have only a few trips, and you do not know where the landing sites are, y
 
 
 ```{r beg and end, include=FALSE,eval = FALSE}
-
-library(spatstat.utils)
 
 df3<-df2
 df3<- df3[order(df3$trip_id, df3$time_stamp),]
@@ -249,7 +270,7 @@ trips_summary<-df2%>%
   group_by(trip_id) %>%
   summarise(dist_travelled = sum(dist)/1000,time_travelled=sum(dt/3600,na.rm=TRUE), nobs=n_distinct(time_stamp))  
 
-ggplot()+geom_histogram(data=trips_summary,aes(x=dist_traveled))+theme_bw()#in meters
+ggplot()+geom_histogram(data=trips_summary,aes(x=dist_travelled))+theme_bw()#in meters
 
 ggplot()+geom_histogram(data=trips_summary,aes(x=time_travelled))+theme_bw()#in hours
 
