@@ -113,14 +113,14 @@ df$y_utm <- coords_utm$Y
 
 coastline <- read_sf(dsn = ".", layer = "OutHebrides")#in UTM
 coastline_utm <- st_transform(coastline, crs_utm)
-coastline_utm_land <- coastline_utm%>%
+coastline_utm_land <- coastline_utm %>%
   st_buffer(dist=land_buffer)
 
 #try parallel running?
-land <-lengths(st_intersects(df_sf_utm, 
+land <- lengths(st_intersects(df_sf_utm, 
                              coastline_utm_land, 
                              parallel = 5)) > 0#
-df2<-df[!c(land),]#remove points on land #56237
+df2 <- df[!c(land),]#remove points on land #56237
 
 ```
 
@@ -136,11 +136,11 @@ df2$time_stamp<-as.POSIXct((df2$time_stamp), format = "%Y-%m-%d %H:%M:%OS",origi
 df2<- df2[order(df2$device_id, df2$time_stamp),]
 
 #add distances in x and y
-df2<-df2%>%
+df2 <- df2%>%
   group_by(device_id)%>%
   mutate(dx=c(0,abs(diff(x_utm))),dy=c(0,abs(diff(y_utm))),dt=c(0,abs(diff(time_stamp))))
 
-df2<-df2%>%
+df2 <- df2%>%
   group_by(device_id)%>%
   mutate(dist=sqrt(dx^2+dy^2))
 
