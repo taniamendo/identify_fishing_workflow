@@ -28,16 +28,16 @@ Here we specify the threshold values for each parameter. These parameters will c
 #Parameters
 
 #to define study area
-lat_max<-59 #degrees
-lat_min<-56 #degrees
-lon_max<--6 #degrees
-lon_min<--8 #degrees
+lat_max <- 59 #degrees
+lat_min <- 56 #degrees
+lon_max <- -6 #degrees
+lon_min <- -8 #degrees
 
-crs_original<-4326
-crs_utm<-32630
-land_buffer<--10 #metres
-speed_filter<-25#knots
-port_buffer<-200 #metres
+crs_original <- 4326
+crs_utm <- 32630
+land_buffer <- -10 #metres
+speed_filter <- 25#knots
+port_buffer <- 200 #metres
 
 ```
 
@@ -50,12 +50,12 @@ Tracking data might contain positions outside the study area due to many reasons
 #**************************
 #1.- Define study area
 #**************************
-df<-read.csv("test_harbours.csv")#59413
+df <- read.csv("test_harbours.csv")#59413
 
-df<-df%>%
+df <- df %>%
   filter(latitude>lat_min&latitude <lat_max)
 
-df<-df%>%
+df <- df %>%
   filter(longitude<lon_max&longitude>lon_min)#56642
 
 ```
@@ -66,10 +66,10 @@ Sometimes duplicates are generated while tracking.
 
 ```{r duplicates, include=FALSE,eval = FALSE}
 
-df<-df%>% 
+df <- df %>% 
   distinct(longitude,latitude, time_stamp,.keep_all = TRUE)
 
-df<-df%>% 
+df <- df %>% 
   distinct(longitude,latitude, device_id,.keep_all = TRUE)#56267
 
 #visualise (optional)
@@ -106,18 +106,20 @@ Map from: Contains OS data © Crown copyright and database right 2022. Retrieved
 ```{r points on land, include=FALSE,eval = FALSE}
 
 df_sf = st_as_sf(df, coords = c("longitude", "latitude"), crs = crs_original)
-df_sf_utm<-st_transform(df_sf, crs_utm)
-coords_utm<-as.data.frame(st_coordinates(df_sf_utm))
-df$x_utm<-coords_utm$X
-df$y_utm<-coords_utm$Y
+df_sf_utm <- st_transform(df_sf, crs_utm)
+coords_utm <- as.data.frame(st_coordinates(df_sf_utm))
+df$x_utm <- coords_utm$X
+df$y_utm <- coords_utm$Y
 
 coastline <- read_sf(dsn = ".", layer = "OutHebrides")#in UTM
-coastline_utm<-st_transform(coastline, crs_utm)
-coastline_utm_land<-coastline_utm%>%
+coastline_utm <- st_transform(coastline, crs_utm)
+coastline_utm_land <- coastline_utm%>%
   st_buffer(dist=land_buffer)
 
 #try parallel running?
-land <-lengths(st_intersects(df_sf_utm, coastline_utm_land,parallel = 5)) > 0#
+land <-lengths(st_intersects(df_sf_utm, 
+                             coastline_utm_land, 
+                             parallel = 5)) > 0#
 df2<-df[!c(land),]#remove points on land #56237
 
 ```
