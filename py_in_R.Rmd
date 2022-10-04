@@ -1,0 +1,105 @@
+---
+title: "Python in R workflow"
+output: html_document
+date: "2022-10-03"
+---
+
+This document shows an example of how python can be accessed within an R working frame.
+This Requires that you have a python application installed, the rest can happen directly from here.
+
+This workflow in a markdown style, will in essence create two "environments" one python one R, and then elements can be acceded back and forth. Automatic translation happens for a series of functions/ types of data, see "https://www.rstudio.com/blog/reticulate-r-interface-to-python/" under "Type conversions"
+
+#preamble
+```{r, initiate python, include=FALSE, eval = TRUE}
+library(pacman)
+
+#install python input pakacge
+p_load(reticulate)
+
+#point to you python aplication
+use_python("C:/Users/jostou/AppData/Local/r-miniconda/python.exe")
+
+#install libraries, oly needed once
+py_install("scikit-learn", envname = NULL)
+py_install("pandas", envname = NULL)
+```
+
+#example one
+
+```{python}
+#load in oakages in python inveronment
+import pandas
+import sklearn
+
+#do stuff in pyhon
+df = pandas.DataFrame({'A':[1,1,3,2,6,2,8]})
+
+```
+
+
+```{r, do stuff r, include=FALSE, eval = TRUE}
+
+#Do stuff in R, with the stuff made in python, 
+
+#acess python elements with py$element
+r_df <- py$df
+
+```
+
+
+
+#Example two
+
+
+```{r, import data, include=FALSE, eval = TRUE}
+#have data in R
+
+dat = structure(list(fid = c("A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357", "A357", 
+"A357", "A357", "A357", "A357", "A357", "A357", "A357"), lgrad = c(9.96133, 
+9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 9.9613, 9.96132, 
+9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 
+9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 9.96133, 
+9.96133, 9.96133, 9.96132, 9.96132, 9.96133, 9.96133, 9.96132, 
+9.96132, 9.96132, 9.96131, 9.96132, 9.96132, 9.96133, 9.96132, 
+9.96132, 9.96132, 9.96132, 9.96132, 9.96132, 9.96132, 9.96132, 
+9.96132, 9.96132, 9.96132, 9.96131, 9.96131, 9.96131, 9.96132, 
+9.96132, 9.96132, 9.96132, 9.96132, 9.96131, 9.9613, 9.96134, 
+9.96133, 9.96134, 9.96134, 9.96134, 9.96134, 9.96134, 9.96134, 
+9.96133, 9.96133, 9.96134, 9.9613, 9.96133, 9.96133, 9.96133, 
+9.96132, 9.96132, 9.96131, 9.96131, 9.96131, 9.96133, 9.96133, 
+9.96134, 9.96134, 9.96134, 9.96134, 9.96134, 9.96133, 9.96134, 
+9.96135, 9.96134, 9.96132, 9.96133, 9.96134, 9.96134, 9.96134, 
+9.96133, 9.96133, 9.96134, 9.96134, 9.96134, 9.96134, 9.96134, 
+9.96133)), row.names = c(NA, -100L), class = c("data.table", 
+"data.frame"))
+
+```
+
+
+```{python}
+#do stuff with R data in python environment
+
+#acsess R-elements with "r.element"
+a = r.dat['fid'].unique()
+
+
+```
+
+
+```{r, do stuff r, include=FALSE, eval = TRUE}
+#get the results from python back into R
+r_a <- py$a
+
+```
+
