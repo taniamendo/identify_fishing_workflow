@@ -17,11 +17,13 @@ library(leaflet)
 library(leaflet.extras)
 library(viridis)
 library(sf)
+library(data.table)
 
 ```
 
 #Parameters
-Here we specify the threshold values for each parameter. These parameters will change depending on the fishery and require careful thinking by researchers.
+Here we specify the threshold values for each parameter. These parameters will 
+change depending on the fishery and require careful thinking by researchers.
 
 ```{r parameters, include=FALSE,eval = FALSE}
 
@@ -43,7 +45,9 @@ port_buffer <- 200 #metres
 
 #1. Define study area
 
-Tracking data might contain positions outside the study area due to many reasons. We have to first remove these data points. You will need to specify roughly your study area.
+Tracking data might contain positions outside the study area due to many reasons.
+We have to first remove these data points. You will need to specify roughly your
+study area.
 
 ```{r cleaning, include=FALSE,eval = FALSE}
 
@@ -53,10 +57,10 @@ Tracking data might contain positions outside the study area due to many reasons
 df <- read.csv("test_harbours.csv")#59413
 
 df <- df %>%
-  filter(latitude>lat_min&latitude <lat_max)
+  filter(latitude > lat_min & latitude < lat_max)
 
 df <- df %>%
-  filter(longitude<lon_max&longitude>lon_min)#56642
+  filter(longitude < lon_max & longitude > lon_min)#56642
 
 ```
 
@@ -67,60 +71,67 @@ Sometimes duplicates are generated while tracking.
 ```{r duplicates, include=FALSE,eval = FALSE}
 
 df <- df %>% 
-  distinct(longitude,latitude, time_stamp,.keep_all = TRUE)
+  distinct(longitude, latitude, time_stamp,
+           .keep_all = TRUE)
 
 df <- df %>% 
-  distinct(longitude,latitude, device_id,.keep_all = TRUE)#56267
+  distinct(longitude, latitude, device_id, 
+           .keep_all = TRUE)#56267
 
 #visualise (optional)
 
 wardpal <- colorFactor(viridis(8), df$device_id)
 
- leaflet() %>%
-   addTiles() %>%
-     addCircleMarkers(lng = ~longitude,
-              lat = ~latitude,
-              radius=1,
-              popup = ~ as.character(time_stamp),
-              label = ~as.character(time_stamp),
-              fillColor=~wardpal(device_id),
-              fillOpacity = 1,
-              stroke=FALSE,
-              data = df) %>%
-    addScaleBar()%>%
-   addLegend(position="bottomright",pal=wardpal,values=df$device_id)
+leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~longitude,
+                   lat = ~latitude,
+                   radius = 1,
+                   popup = ~ as.character(time_stamp),
+                   label = ~as.character(time_stamp),
+                   fillColor = ~wardpal(device_id),
+                   fillOpacity = 1,
+                   stroke = FALSE,
+                   data = df) %>%
+  addScaleBar()%>%
+  addLegend(position = "bottomright",
+            pal = wardpal,
+            values = df$device_id)
 
 ```
 
 #3. Remove points on land
 
-Please be aware you will need a high resolution coastline shapefile to adequately remove points on land.
+Please be aware you will need a high resolution coastline shapefile to 
+adequately remove points on land.
 
 #AIS
 #GNSS - 
 #human error
 
-Map from: Contains OS data © Crown copyright and database right 2022. Retrieved from: https://osdatahub.os.uk/downloads/open
+Map from: Contains OS data © Crown copyright and database right 2022. 
+Retrieved from: https://osdatahub.os.uk/downloads/open
 
 
 ```{r points on land, include=FALSE,eval = FALSE}
 
-df_sf = st_as_sf(df, coords = c("longitude", "latitude"), crs = crs_original)
+df_sf = st_as_sf(df, coords = c("longitude", "latitude"), 
+                 crs = crs_original)
 df_sf_utm <- st_transform(df_sf, crs_utm)
 coords_utm <- as.data.frame(st_coordinates(df_sf_utm))
 df$x_utm <- coords_utm$X
 df$y_utm <- coords_utm$Y
 
-coastline <- read_sf(dsn = ".", layer = "OutHebrides")#in UTM
+coastline <- read_sf(dsn = ".", layer = "OutHebrides") #in UTM
 coastline_utm <- st_transform(coastline, crs_utm)
 coastline_utm_land <- coastline_utm %>%
-  st_buffer(dist=land_buffer)
+  st_buffer(dist = land_buffer)
 
 #try parallel running?
 land <- lengths(st_intersects(df_sf_utm, 
-                             coastline_utm_land, 
-                             parallel = 5)) > 0#
-df2 <- df[!c(land),]#remove points on land #56237
+                              coastline_utm_land, 
+                              parallel = 5)) > 0#
+df2 <- df[!c(land),] #remove points on land #56237
 
 ```
 
@@ -132,46 +143,56 @@ We have to remove records associated with very high speed that are unrealistic.
 ```{r speed, include=FALSE,eval = FALSE}
 
 options(digits.secs = 3)
-df2$time_stamp<-as.POSIXct((df2$time_stamp), format = "%Y-%m-%d %H:%M:%OS",origin="1970-01-01", tz = 'Europe/London')#
+df2$time_stamp <- as.POSIXct((df2$time_stamp),
+                             format = "%Y-%m-%d %H:%M:%OS",
+                             origin="1970-01-01",
+                             tz = 'Europe/London')#
+# df2$time_stamp <- lubridate::ymd_hms(df2$time_stamp, 
+#                                      tz = 'Europe/London')
 df2<- df2[order(df2$device_id, df2$time_stamp),]
 
 #add distances in x and y
 df2 <- df2%>%
   group_by(device_id)%>%
-  mutate(dx=c(0,abs(diff(x_utm))),dy=c(0,abs(diff(y_utm))),dt=c(0,abs(diff(time_stamp))))
+  mutate(dx = c(0, abs(diff(x_utm))),
+         dy = c(0, abs(diff(y_utm))),
+         dt = c(0, abs(diff(time_stamp))))
 
 df2 <- df2%>%
-  group_by(device_id)%>%
-  mutate(dist=sqrt(dx^2+dy^2))
+  group_by(device_id) %>%
+  mutate(dist = sqrt(dx^2 + dy^2))
 
-df2$speed<-df2$dist/df2$dt*1.943
-df2<- df2%>% rowid_to_column("seq") 
+df2$speed <- df2$dist / df2$dt * 1.943
+df2 <- df2 %>% rowid_to_column("seq") 
 
 #loop to remove erroneous speeds
 
 repeat { 
-  subset<-df2%>%
-    filter(speed>speed_filter)
-
-sel<-factor(subset$seq)
-
-nrows<-length(sel)
-
-  if (nrows==0) {
+  subset <- df2 %>%
+    filter(speed > speed_filter)
+  
+  sel<-factor(subset$seq)
+  
+  nrows<-length(sel)
+  
+  if (nrows == 0) {
     break
-    } 
+  } 
   else
-df2<-df2[!df2$seq %in% sel,] 
-
-df2<-df2%>%
-  group_by(device_id)%>%
-  mutate(dx=c(0,abs(diff(x))),dy=c(0,abs(diff(y))),dt=c(0,abs(diff(time_stamp))))
-
-df2<-df2%>%
-  group_by(device_id)%>%
-  mutate(dist=sqrt(dx^2+dy^2),dt=c(0,abs(diff(time_stamp))))
-df2$speed<-df2$dist/df2$dt*1.943
-
+    df2 <- df2[!df2$seq %in% sel,] 
+  
+  df2 <- df2 %>%
+    group_by(device_id) %>%
+    mutate(dx = c(0, abs(diff(x))),
+           dy = c(0, abs(diff(y))),
+           dt = c(0, abs(diff(time_stamp))))
+  
+  df2 <- df2 %>%
+    group_by(device_id)%>%
+    mutate(dist = sqrt(dx^2+dy^2),
+           dt = c(0,abs(diff(time_stamp))))
+  df2$speed <- df2$dist / df2$dt * 1.943
+  
 } #56051 obs
 
 ```
@@ -191,12 +212,12 @@ Cut track data into potential trips. Again for this step, knowledge on the fishe
 
 #1)Based on fishing activity - daily patterns
 
-df2$date<-as.Date(format(as.POSIXct(df2$time_stamp), "%Y-%m-%d"))
-df2$trip_id<-paste(df2$device_id,df2$date)
+df2$date <- as.Date(format(as.POSIXct(df2$time_stamp), "%Y-%m-%d"))
+df2$trip_id <- paste(df2$device_id,df2$date)
 
 #2) With harbour list - either dinfe harbours with clusters or you already have a list of harbours
 
- 
+
 #  
 ```
 
@@ -213,31 +234,36 @@ If you have only a few trips, and you do not know where the landing sites are, y
 
 library(spatstat.utils)
 
-df3<-df2
-df3<- df3[order(df3$trip_id, df3$time_stamp),]
+df3 <- df2
+df3 <- df3[order(df3$trip_id, df3$time_stamp),]
 
-df3<-df3%>%
-  group_by(trip_id)%>%
-  mutate(cum_dist=cumsum(dist), rev_cum_dist=revcumsum(dist))
+df3 <- df3%>%
+  group_by(trip_id) %>%
+  mutate(cum_dist = cumsum(dist), 
+         rev_cum_dist = revcumsum(dist))
 
-subset<-df3%>%
-  filter(cum_dist<400|rev_cum_dist<400)
+subset <- df3 %>%
+  filter(cum_dist < 400 | rev_cum_dist < 400)
 
-coastline_buffer<-coastline_utm%>%
-  st_buffer(dist=200)
+coastline_buffer <- coastline_utm %>%
+  st_buffer(dist = 200)
 
-df_sf = st_as_sf(subset, coords = c("x_utm", "y_utm"), crs = crs_utm)
+df_sf = st_as_sf(subset,
+                 coords = c("x_utm", "y_utm"), 
+                 crs = crs_utm)
 
-points_in_coast_buffer <-lengths(st_intersects(df_sf, coastline_buffer)) > 0
+points_in_coast_buffer <- lengths(st_intersects(df_sf, coastline_buffer)) > 0
 
-df3_sf = st_as_sf(df3, coords = c("x_utm", "y_utm"), crs = crs_utm)
-df4<-df_sf[c(points_in_coast_buffer),]#9075
+df3_sf = st_as_sf(df3, 
+                  coords = c("x_utm", "y_utm"), 
+                  crs = crs_utm)
+df4 <- df_sf[c(points_in_coast_buffer),]#9075
 
 #remove sequence of points in df4
 
-sel<-df4$seq
+sel <- df4$seq
 
-df2<-df2[!df2$seq %in% sel,] #55256
+df2 <- df2[!df2$seq %in% sel,] #55256
 
 ```
 
@@ -247,22 +273,29 @@ at this point, you might want to check summary statistics for your trips and def
 
 ```{r trips, include=FALSE}
 
-trips_summary<-df2%>%
+trips_summary <- df2 %>%
   group_by(trip_id) %>%
-  summarise(dist_travelled = sum(dist)/1000,time_travelled=sum(dt/3600,na.rm=TRUE), nobs=n_distinct(time_stamp))  
+  summarise(dist_travelled = sum(dist)/1000,
+            time_travelled = sum(dt/3600, na.rm=TRUE),
+            nobs = n_distinct(time_stamp))  
 
-ggplot()+geom_histogram(data=trips_summary,aes(x=dist_traveled))+theme_bw()#in meters
+ggplot() +
+  geom_histogram(data = trips_summary, aes(x = dist_traveled)) + #in meters
+  theme_bw()
 
-ggplot()+geom_histogram(data=trips_summary,aes(x=time_travelled))+theme_bw()#in hours
+ggplot() +
+  geom_histogram(data = trips_summary, 
+                 aes(x = time_travelled)) + #in hours
+  theme_bw()
 
-trips_summary<-trips_summary%>%
-  filter(time_travelled<1|nobs<50|dist_travelled<5)
+trips_summary <- trips_summary %>%
+  filter(time_travelled < 1 | nobs < 50 | dist_travelled < 5)
 
-sel<-trips_summary$trip_id
+sel <- trips_summary$trip_id
 
-df2<-df2[!df2$trip_id %in% sel,] #54986
+df2 <- df2[!df2$trip_id %in% sel,] #54986
 
-write.table(df2,"clean_track_data.txt")
+write.table(df2, "clean_track_data.txt")
 
 
 ```
