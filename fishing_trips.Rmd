@@ -143,27 +143,28 @@ We have to remove records associated with very high speed that are unrealistic.
 ```{r speed, include=FALSE,eval = FALSE}
 
 options(digits.secs = 3)
-df2$time_stamp <- as.POSIXct((df2$time_stamp),
-                             format = "%Y-%m-%d %H:%M:%OS",
-                             origin="1970-01-01",
-                             tz = 'Europe/London')#
-# df2$time_stamp <- lubridate::ymd_hms(df2$time_stamp, 
-#                                      tz = 'Europe/London')
+# df2$time_stamp <- as.POSIXct((df2$time_stamp),
+#                              format = "%Y-%m-%d %H:%M:%OS",
+#                              origin="1970-01-01",
+#                              tz = 'Europe/London')#
+df2$time_stamp <- lubridate::ymd_hms(df2$time_stamp,
+                                     tz = 'Europe/London')
 df2<- df2[order(df2$device_id, df2$time_stamp),]
 
 #add distances in x and y
-df2 <- df2%>%
+df2 <- df2 %>%
   group_by(device_id)%>%
   mutate(dx = c(0, abs(diff(x_utm))),
          dy = c(0, abs(diff(y_utm))),
          dt = c(0, abs(diff(time_stamp))))
 
-df2 <- df2%>%
+df2 <- df2 %>%
   group_by(device_id) %>%
   mutate(dist = sqrt(dx^2 + dy^2))
 
 df2$speed <- df2$dist / df2$dt * 1.943
-df2 <- df2 %>% rowid_to_column("seq") 
+df2 <- df2 %>%
+  rowid_to_column("seq") 
 
 #loop to remove erroneous speeds
 
@@ -171,9 +172,9 @@ repeat {
   subset <- df2 %>%
     filter(speed > speed_filter)
   
-  sel<-factor(subset$seq)
+  sel <- factor(subset$seq)
   
-  nrows<-length(sel)
+  nrows <- length(sel)
   
   if (nrows == 0) {
     break
@@ -188,7 +189,7 @@ repeat {
            dt = c(0, abs(diff(time_stamp))))
   
   df2 <- df2 %>%
-    group_by(device_id)%>%
+    group_by(device_id) %>%
     mutate(dist = sqrt(dx^2+dy^2),
            dt = c(0,abs(diff(time_stamp))))
   df2$speed <- df2$dist / df2$dt * 1.943
@@ -227,17 +228,19 @@ Depending on the device you are using, a lot of geospatial data might be collect
 
 There are two approaches to identify these points. 
 
-If you have only a few trips, and you do not know where the landing sites are, you might want to delete observations at the beginning and at the end of a trip. For example, you can set a specific distance from the coastline from which you expect a vessel to have left their landing sites and steaming to fishing grounds already.
+If you have only a few trips, and you do not know where the landing sites are, 
+you might want to delete observations at the beginning and at the end of a trip. For example, you can set a specific distance from the coastline from which you expect a vessel to have left their landing sites and steaming to fishing grounds already.
 
 
 ```{r beg and end, include=FALSE,eval = FALSE}
+
 
 library(spatstat.utils)
 
 df3 <- df2
 df3 <- df3[order(df3$trip_id, df3$time_stamp),]
 
-df3 <- df3%>%
+df3 <- df3 %>%
   group_by(trip_id) %>%
   mutate(cum_dist = cumsum(dist), 
          rev_cum_dist = revcumsum(dist))
