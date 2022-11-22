@@ -46,13 +46,13 @@ Tracking data might contain positions outside the study area due to many reasons
 #**************************
 #1.- Define study area
 #**************************
-df<-read.csv("test_harbours.csv")#59413
+df<-readRDS("Q:/dfad/users/jostou/home/22_09_16_tania_find fishing/data/df.rds")
 
-df<-df%>%
-  filter(latitude>lat_min&latitude <lat_max)
-
-df<-df%>%
-  filter(longitude<lon_max&longitude>lon_min)#56642
+# df<-df%>%
+#   filter(latitude>lat_min&latitude <lat_max)
+# 
+# df<-df%>%
+#   filter(longitude<lon_max&longitude>lon_min)#56642
 
 ```
 
@@ -107,7 +107,7 @@ coords_utm<-as.data.frame(st_coordinates(df_sf_utm))
 df$x_utm<-coords_utm$X
 df$y_utm<-coords_utm$Y
 
-coastline <- read_sf(dsn = ".", layer = "OutHebrides")#in UTM
+coastline <- read_sf("Q:/gis/Dynamisk/GEOdata/BasicLayers/CoastLines/Denmark/Denmark_Simple.shp")#in UTM
 coastline_utm<-st_transform(coastline, crs_utm)
 coastline_utm_land<-coastline_utm%>%
   st_buffer(dist=land_buffer)
@@ -153,8 +153,7 @@ nrows<-length(sel)
 
   if (nrows==0) {
     break
-    } 
-  else
+    } else {
 df2<-df2[!df2$seq %in% sel,] 
 
 df2<-df2%>%
@@ -165,7 +164,7 @@ df2<-df2%>%
   group_by(device_id)%>%
   mutate(dist=sqrt(dx^2+dy^2),dt=c(0,abs(diff(time_stamp))))
 df2$speed<-df2$dist/df2$dt*1.943
-
+}
 } #56051 obs
 
 ```

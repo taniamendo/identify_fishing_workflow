@@ -19,7 +19,7 @@ p_load(reticulate)
 #point to you python aplication
 use_python("C:/Users/jostou/AppData/Local/r-miniconda/python.exe")
 
-#install libraries, oly needed once
+#install libraries, only needed once
 py_install("scikit-learn", envname = NULL)
 py_install("pandas", envname = NULL)
 ```
