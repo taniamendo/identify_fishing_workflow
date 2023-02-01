@@ -1,0 +1,329 @@
+---
+title: "Identifying fishing trips and activities"
+author: "Tania Mendo"
+date: '2022-06-27'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#Libraries
+
+```{r libraries, include=FALSE,eval = FALSE}
+
+library(tidyverse)
+library(sf)
+library(spatstat.utils)
+
+```
+
+#Dataset
+
+The dataset should include 4 columns: latitude (WGS84), longitude (WGS84), time stamp (Y-m-d H:M:S) and a device or vessel identifier.
+
+#Parameters
+Here we specify the threshold values for each parameter. These parameters will change depending on where and how the fishery operates. Expert knowledge is required to assign a speed threshold and the buffer that will be assigned around each port.
+
+```{r parameters, include=FALSE,eval = FALSE}
+
+#Parameters
+
+#to define study area
+lat_max<-59 #degrees
+lat_min<-56 #degrees
+lon_max<--6 #degrees
+lon_min<--8 #degrees
+
+crs_original<-4326 # modify as needed
+crs_utm<-32630 # modify as needed
+#land_buffer<--10 #- 10 metres
+speed_filter<-25#greatest speed possible for vessels during steaming (in knots)
+port_buffer<-200 #buffer radius around the port, where points will be removed before inferring fishing activities (in metres)
+
+```
+
+#1. Define study area
+
+Tracking data might contain positions outside the study area due to many reasons. We have to first remove these data points. You will need to specify roughly your study area.
+
+```{r study area, include=FALSE,eval = FALSE}
+
+#**************************
+#1.- Define study area
+#**************************
+df<-read.csv("track_data_202107.csv")
+df<-head(df,10000)
+df<-df%>%
+  filter(latitude>lat_min&latitude <lat_max)
+
+df<-df%>%
+  filter(longitude<lon_max&longitude>lon_min)
+
+```
+
+#2. Remove duplicates
+
+```{r duplicates, include=FALSE,eval = FALSE}
+
+df<-df%>% 
+  distinct(longitude,latitude, time_stamp,.keep_all = TRUE)
+
+```
+
+#3. Remove points on land
+
+Please be aware you will need a high resolution coastline shapefile to adequately remove points on land.
+
+The current map was downlaoded from: OS data © Crown copyright and database right 2022. Retrieved from: https://osdatahub.os.uk/downloads/open
+
+
+```{r points on land, include=FALSE,eval = FALSE}
+
+df_sf = st_as_sf(df, coords = c("longitude", "latitude"), crs = crs_original)
+df_sf_utm<-st_transform(df_sf, crs_utm)#transform to UTM system
+coords_utm<-as.data.frame(st_coordinates(df_sf_utm))#extract coordinates
+df$x_utm<-coords_utm$X
+df$y_utm<-coords_utm$Y
+
+coastline <- read_sf(dsn = ".", layer = "OutHebrides")#read map
+coastline_utm<-st_transform(coastline, crs_utm)
+
+land <-lengths(st_intersects(df_sf_utm, coastline_utm,parallel = 5)) > 0#
+df<-df[!c(land),]#remove points on land 
+
+```
+
+#4. Remove unrealistic velocities
+
+We have to remove records associated with very high vessel speeds that are unrealistic.
+
+```{r speed, include=FALSE,eval = FALSE}
+
+options(digits.secs = 3)
+df$time_stamp<-as.POSIXct((df$time_stamp), format = "%Y-%m-%d %H:%M:%OS",origin="1970-01-01", tz = 'Europe/London')#
+df<- df[order(df$device_id, df$time_stamp),]
+
+#add distances between consecutive observations in x and y
+df<-df%>%
+  group_by(device_id)%>%
+  mutate(dx=c(0,abs(diff(x_utm))),dy=c(0,abs(diff(y_utm))),dt=difftime(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), lag(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), units = 'secs')),
+         dt = as.numeric(dt, units = 'secs'))%>%
+  mutate(dist=sqrt(dx^2+dy^2))%>%
+  mutate(speed=dist/dt*1.943)#speed in knots
+
+df<- df%>% rowid_to_column("seq") #add a unique identifier to each row
+
+#loop to remove erroneous speeds
+
+repeat { 
+  subset<-df%>%
+    filter(speed>speed_filter)
+
+sel<-factor(subset$seq)
+
+nrows<-length(sel)
+
+  if (nrows==0) {
+    break
+    } 
+  else
+df<-df[!df$seq %in% sel,] 
+
+df<-df%>%
+  group_by(device_id)%>%
+  mutate(dx=c(0,abs(diff(x_utm))),dy=c(0,abs(diff(y_utm))),dt=c(0,abs(diff(time_stamp))))
+
+df<-df%>%
+  group_by(device_id)%>%
+  mutate(dist=sqrt(dx^2+dy^2),dt=c(0,abs(diff(time_stamp))))
+df$speed<-df$dist/df$dt*1.943
+
+}
+
+```
+
+#5. Define individual trips
+
+```{r define trips, include=FALSE,eval = FALSE}
+
+#1)Based on fishing activity - daily patterns
+
+df$date<-as.Date(format(as.POSIXct(df$time_stamp), "%Y-%m-%d"))
+df$trip_id<-paste(df$device_id,df$date)
+
+# 2) Based on mooring/anchorage sites
+
+#See Sup. Mat.XX R Code "Identifying mooring sites"
+
+#3) From logbook data 
+
+#See Sup. Mat.XX R Code "Identifying trips from logbook data" - JONATHAN
+
+```
+
+#6. Delete observations "in port"
+
+```{r ports, include=FALSE,eval = FALSE}
+
+df<- df[order(df$trip_id, df$time_stamp),]
+
+df<-df%>%
+  group_by(trip_id)%>%
+  mutate(cum_dist=cumsum(dist), rev_cum_dist=revcumsum(dist))
+
+subset<-df%>%
+  filter(cum_dist<800|rev_cum_dist<800)
+
+coastline_buffer<-coastline_utm%>%
+  st_buffer(dist=port_buffer)
+
+df_sf = st_as_sf(subset, coords = c("x_utm", "y_utm"), crs = crs_utm)
+
+points_in_coast_buffer <-lengths(st_intersects(df_sf, coastline_buffer)) > 0
+
+df_sf<-df_sf[c(points_in_coast_buffer),]#9075
+
+#remove sequence of points in df_sf
+
+sel<-df_sf$seq
+
+df<-df[!df$seq %in% sel,] #55256
+
+```
+
+#7.- Remove "spurious" trips
+
+
+```{r trips, include=FALSE}
+
+trips_summary<-df%>%
+  group_by(trip_id) %>%
+  summarise(dist_travelled = sum(dist)/1000,time_travelled=sum(dt/3600,na.rm=TRUE), nobs=n_distinct(time_stamp))  
+
+ggplot()+geom_histogram(data=trips_summary,aes(x=dist_travelled))+theme_bw()#in meters
+
+ggplot()+geom_histogram(data=trips_summary,aes(x=time_travelled))+theme_bw()#in hours
+
+trips_summary<-trips_summary%>%
+  filter(time_travelled<1|nobs<50|dist_travelled<5)
+
+sel<-trips_summary$trip_id
+
+df<-df[!df$trip_id %in% sel,] #54986
+
+write.table(df,"clean_trips_data_subset.txt",sep=",")
+
+
+```
+
+#Inferring fishing activities
+
+1) Data pre-processing
+
+```{r cut trips, include=FALSE}
+
+df2<-read.table("clean_trips_data_subset.txt",sep=",")
+
+options(digits.secs = 3)
+df2$time_stamp<-as.POSIXct((df2$time_stamp), format = "%Y-%m-%d %H:%M:%OS",origin="1970-01-01", tz = 'Europe/London')#
+df2<- df2[order(df2$trip_id, df2$time_stamp),]
+
+#add distance and time between consecutive observations in x and y
+df2<-df2%>%
+  group_by(trip_id)%>%
+  mutate(dx=c(0,abs(diff(x_utm))),dy=c(0,abs(diff(y_utm))),dt = difftime(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), lag(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), units = 'secs')),
+         dt = as.numeric(dt, units = 'secs'))%>%
+   mutate(dist=sqrt(dx^2+dy^2))
+
+#df2$check<-ifelse(df2$dist>500,1,2)
+
+df2<-df2 %>% 
+ group_by(trip_id) %>%
+ mutate(newID = ifelse(dist>500, 1,0))#if the distance between two consecutive observations is greater than 500 metres, assign a 1, otherwise a 0.
+
+df2$newID<-cumsum(c(na.omit(df2$newID,na.rm=TRUE)))#add unique identifier for each segment of trip
+
+```
+
+#Regularise tracks
+
+```{r interpolation, include=FALSE}
+
+#create data frame with time_stamps every minute to interpolate positions
+
+interp_df<-df2 %>%
+  group_by(newID,trip_id)%>%
+  expand(time_stamp = seq(
+    from = min(time_stamp),
+    to = max(time_stamp),
+    by = 'min')) %>%
+  arrange(time_stamp) 
+#
+
+t <- df2$time_stamp #starting time_stamps
+y <- df2$x_utm #longitudes
+f <- approxfun(t,y)
+
+interp_df$x_utm<-f(interp_df$time_stamp)
+y <- df2$y_utm
+f <- approxfun(t,y)
+interp_df$y_utm<-f(interp_df$time_stamp)
+
+
+```
+
+#Remove points on land
+
+
+```{r points on land, include=FALSE,eval = FALSE}
+
+df_sf = st_as_sf(interp_df, coords = c("x_utm", "y_utm"), crs = crs_utm)
+
+land <-lengths(st_intersects(df_sf, coastline_utm,parallel = 5)) > 0#
+interp_df<-interp_df[!c(land),]#remove points on land 
+
+```
+
+
+#Infer fishing activities
+
+```{r fishing, include=FALSE}
+
+#When no validation data available:
+#See Code provided in Mendo et al, 2019 for speed thresholds, Hidden Markov models and Expectation Maximisation algorithms. - 
+
+#Random forests?
+
+#???ANY OTHER???
+
+```
+
+#Remove spurious fishing activities
+
+```{r fishing check, include=FALSE}
+
+interp_df<- interp_df[order(interp_df$newID, interp_df$time_stamp),]
+
+interp_df$rf_behaviour_1<-dplyr::lead(interp_df$rf_behaviour,n=1)
+interp_df$rf_behaviour_2<-dplyr::lead(interp_df$rf_behaviour,n=2L)
+interp_df$rf_behaviour__1<-dplyr::lag(interp_df$rf_behaviour,n=1L)
+interp_df$rf_behaviour__2<-dplyr::lag(interp_df$rf_behaviour,n=2L)
+
+interp_df$fishing<-ifelse(interp_df$rf_behaviour=="not_fishing"&interp_df$rf_behaviour_1=="fishing"&interp_df$rf_behaviour_2=="fishing"&interp_df$rf_behaviour__1=="fishing"&interp_df$rf_behaviour__2=="fishing", "fishing", as.character(interp_df$rf_behaviour))
+
+interp_df$fishing<-ifelse(interp_df$rf_behaviour=="fishing"&interp_df$rf_behaviour_1=="not_fishing"&interp_df$rf_behaviour_2=="not_fishing"&interp_df$rf_behaviour__1=="not_fishing"&interp_df$rf_behaviour__2=="not_fishing", "not_fishing",as.character( interp_df$fishing))
+
+
+```
+
+#Identify fishing trips
+
+```{r fishing trips, include=FALSE}
+
+fishing_trips<-interp_df%>%
+  filter(fishing=="fishing")%>%
+  summarise(fishing_trip_ID=unique(trip_id))
+
+```
+
+
