@@ -1,0 +1,287 @@
+---
+title: "Identifying mooring/anchoring sites"
+author: "Tania Mendo"
+date: "2022-08-29"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#Identifying harbours or mooring/anchorage sites
+
+```{r libraries, include=FALSE,eval = FALSE}
+
+library(tidyverse)
+library(sf)
+library(leaflet)#for visualisation
+library(leaflet.extras)#for visualisation
+library(viridis)#for visualisation
+library(cluster)
+library(car)
+library(data.table)
+
+#Specifications
+crs_utm<-32630
+crs_original<-4326
+buffer_land<-200
+distance_moved<-200
+time_elapsed<-2*60*60
+centroids_buff<-200
+```
+
+#read data
+
+Use raw data that is representative of each vessel's activity throughout a year if available (as operational patterns might change throughout the year). 
+
+Input data needed:
+
+vessel identifier
+longitude (UTM)
+latitude (UTM)
+time stamp
+
+```{r data prep, include=FALSE,eval = FALSE}
+
+df<-read.csv("ArtHarbList_Test_5more.csv")# 
+df$time_stamp<-as.POSIXct((df$time_stamp), format = "%Y-%m-%d %H:%M:%OS",origin="1970-01-01", tz = 'Europe/London')#
+df<- df[order(df$vessel_pln, df$time_stamp),]
+
+#add distances in x and y
+df<-df%>%
+  group_by(vessel_pln)%>%
+  mutate(dx=c(0,abs(diff(x_UTM))),dy=c(0,abs(diff(y_UTM))))%>%
+ mutate(dt = difftime(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), lag(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), units = 'secs')),
+         dt = as.numeric(dt, units = 'secs'))%>%
+  mutate(dist=sqrt(dx^2+dy^2))%>%#distance between consecutive observations
+  mutate(speed=dist/dt*1.943)#speed between consecutive observations (in knots)
+
+df<- df%>% rowid_to_column("seq") #add a unique identifier
+
+unique(df$vessel_pln)
+
+df<-df%>%
+  filter(vessel_pln=="CY146")#select one vessel - check which one is going to be OK for example
+
+```
+
+#Select low velocity points
+
+```{r speed, include=FALSE,eval = FALSE}
+
+# only select observations with low speeds (these locations would be presumably in port, when vessel is not moving) 
+ df_1<-df%>%
+  filter(speed<0.1)#Subset to speeds less than 0.1 knot
+```
+
+
+#Subset data to observations close to the coastline
+
+```{r coastline, include=FALSE,eval = FALSE}
+
+coastline <- read_sf(dsn = ".", layer = "OutHebrides")#coastline shapefile
+coastline_utm<-st_transform(coastline, crs_utm)
+
+df_sf = st_as_sf(df_1, coords = c("x_UTM", "y_UTM"), crs = crs_utm)
+
+#Remove points further away from land
+
+coastline_utm_land<-coastline_utm%>%
+  st_buffer(dist = buffer_land) # choose a buffer distance that takes into account how close to land you consider the vessel might be mooring.
+
+land <-lengths(st_intersects(df_sf, coastline_utm_land)) > 0#
+df_1<-df_1[c(land),]#remove points outside the buffer
+
+#at this point it is recommended to visualise the remaining positions - in leaflet lat/lons (WGS84) are required
+
+df_sf = st_as_sf(df_1, coords = c("x_UTM", "y_UTM"), crs = crs_utm)
+df_sf<-st_transform(df_sf, crs_original)#
+coords<-as.data.frame(st_coordinates(df_sf))#extract coordinates
+df_1$lon<-coords$X
+df_1$lat<-coords$Y
+# 
+df_1$date<-as.Date(df_1$time_stamp)# do i need this?
+df_1$trip_id<-paste(df_1$vessel_pln,df_1$date)# do i need this?
+
+wardpal <- colorFactor(viridis(20), df_1$trip_id)
+#
+  leaflet() %>%
+     #addProviderTiles(providers$CartoDB.Positron)%>% 
+     addTiles(urlTemplate = "https://mts1.google.com/vt/lyrs=s&hl=en&src=app&x={x}&y={y}&z={z}&s=G", attribution = 'Google') %>%
+      addCircleMarkers(lng = ~lon,
+               lat = ~lat,
+               radius=5,
+               popup = ~ as.character(date),
+               label = ~as.character(trip_id),
+               fillColor=~wardpal(trip_id),
+               fillOpacity = 3,
+               stroke=FALSE,
+               data = df_1) %>%
+     addScaleBar()%>%
+    addLegend(position="bottomright",pal=wardpal,values=df_1$trip_id)
+```
+
+
+#Interpolate observations
+
+```{r interpolation, include=FALSE,eval = FALSE}
+
+df_1<- df_1[order(df_1$vessel_pln, df_1$time_stamp),]
+
+df_1<-df_1%>%
+  group_by(vessel_pln)%>%
+  mutate(dx=c(0,abs(diff(x_UTM))),dy=c(0,abs(diff(y_UTM))))%>%
+   mutate(dist=sqrt(dx^2+dy^2))%>%
+ mutate(dt = difftime(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), lag(strptime(time_stamp, "%Y-%m-%d %H:%M:%S"), units = 'secs')),
+         dt = as.numeric(dt, units = 'secs'))
+
+df_1<-df_1 %>% 
+ group_by(vessel_pln) %>%
+ mutate(newID = ifelse(dist>distance_moved|dt>time_elapsed, 1,0 ))#cut into segments if the distance between consecutive observations is greater than 200 metres or if the time between consecutive observations is greater than 2 hours.
+
+df_1$newID2<-ifelse(df_1$newID==1,cumsum(c(0,na.omit(df_1$newID,na.rm=TRUE))),df_1$newID)
+
+df_1$newID3<-cumsum(c(0,na.omit(df_1$newID2,na.rm=TRUE)))
+
+interp_df<-df_1 %>%
+  group_by(newID3)%>%
+  expand(time_stamp = seq(
+    from = min(time_stamp),
+    to = max(time_stamp),
+    by = 'min')) %>%
+  arrange(time_stamp) 
+
+t <- df_1$time_stamp
+y <- df_1$x_UTM
+f <- approxfun(t,y)
+
+interp_df$x_UTM<-f(interp_df$time_stamp)
+y <- df_1$y_UTM
+f <- approxfun(t,y)
+interp_df$y_UTM<-f(interp_df$time_stamp)
+interp_df<-interp_df[c("x_UTM","y_UTM")]#only select x and y columns
+
+```
+
+
+#Assess numbers of clusters
+
+```{r k-means clusters, include=FALSE,eval = FALSE}
+
+silhouette_score <- function(k){
+  km <- kmeans(interp_df, centers = k, nstart=10, iter.max = 300,algorithm = c("Lloyd"))
+  ss <- silhouette(km$cluster, dist(interp_df))
+  mean(ss[, 3])
+}
+
+k <- 2:10
+avg_sil <- sapply(k, silhouette_score)
+#plot(k, type='b', avg_sil, xlab='Number of clusters', ylab='Average Silhouette Scores', frame=FALSE)
+optimal_k<- which.max(avg_sil)+1
+
+km.out <- kmeans (interp_df, optimal_k, nstart = 10, iter.max = 300,algorithm = c("Lloyd"))
+
+interp_df$cluster<-km.out$cluster
+
+#select only clusters with at least two observations
+interp_df<-interp_df %>% 
+     group_by(cluster) %>% 
+     filter(n() >1)
+
+interp_df_sf = st_as_sf(interp_df, coords = c("x_UTM", "y_UTM"), crs = crs_utm)
+interp_df_sf<-st_transform(interp_df_sf, crs_original)#
+coords<-as.data.frame(st_coordinates(interp_df_sf))#extract coordinates
+interp_df$lon<-coords$X
+interp_df$lat<-coords$Y
+
+wardpal <- colorFactor(viridis(5), interp_df$cluster)
+
+ leaflet() %>%
+    addTiles(urlTemplate = "https://mts1.google.com/vt/lyrs=s&hl=en&src=app&x={x}&y={y}&z={z}&s=G", attribution = 'Google') %>%
+   #addProviderTiles(providers$CartoDB.Positron)%>% 
+     addCircleMarkers(lng = ~lon,
+              lat = ~lat,
+              radius=5,
+              popup = ~ as.character(cluster),
+              label = ~as.character(cluster),
+              fillColor=~wardpal(cluster),
+              fillOpacity = 1,
+              stroke=FALSE,
+              data = interp_df) %>%
+    addScaleBar()%>%
+   addLegend(position="bottomright",pal=wardpal,values=interp_df$cluster)
+
+```
+ 
+ 
+#Create ellipses
+
+```{r ellipse 95, include=FALSE,eval = FALSE}
+ 
+interp_df$cluster<-as.factor(interp_df$cluster)
+
+ellipse<-dataEllipse(interp_df$lon, interp_df$lat, levels=0.95,groups=interp_df$cluster)
+id=names(ellipse)
+ellipses <- do.call(rbind.data.frame, ellipse)#150976
+
+f<-data.frame()
+
+for ( i in seq_along(id)){
+ f<- rbind( f,as.data.frame(rep(id[i],nrow(ellipse[[i]]))))
+}
+
+ellipses<-cbind(ellipses,f)
+colnames(ellipses)<-c("x","y","id")
+
+#make polygons, extract points not in ellipse
+library(sf)
+library(sfheaders)
+
+ellipses_polygons <- sfheaders::sf_polygon(
+  obj = ellipses
+  , x = "x"
+  , y = "y"
+  , polygon_id = "id"
+)
+sf::st_crs( ellipses_polygons) <- 4326
+
+plot(ellipses_polygons)
+
+df_sf = st_as_sf(interp_df, coords = c("lon", "lat"), crs = 4326)
+#df_sf_utm<-st_transform(df_sf, crs_utm)
+
+points_in_polygons <-lengths(st_intersects(df_sf, ellipses_polygons)) > 0#
+interp_df<-interp_df[c(points_in_polygons),]#remove points outside polygons
+
+#calculate center for each ellipse 
+
+centroids<-interp_df%>%
+  group_by(cluster)%>%
+  summarise(lon_mean=mean(lon),lat_mean=mean(lat))
+centroids_sf = st_as_sf(centroids, coords = c("lon_mean", "lat_mean"), crs = crs_original)
+centroids_utm<-st_transform(centroids_sf, crs_utm)
+
+centroids_utm_buff<-centroids_utm%>%
+  st_buffer(dist=centroids_buff) #polygons with potential mooring or anchoring sites generated.
+plot(centroids_utm_buff)
+
+st_write(centroids_utm_buff, "potential_mooring_sites.shp")
+
+```
+
+#Defining trips
+
+```{r define trips, include=FALSE,eval = FALSE}
+
+df_sf = st_as_sf(df, coords = c("x_UTM", "y_UTM"), crs = crs_utm)
+points_in_polygons <-lengths(st_intersects(df_sf, centroids_utm_buff)) > 0#
+df$in_polygon<-points_in_polygons
+
+df$trip_id<-rleid(df$in_polygon)
+
+#select points outside polygons
+df<-df%>%
+  filter(in_polygon==FALSE)
+#proceed with code in Sup. mat XX - Step 7 - Remove suprious trips
+
+
+```
