@@ -156,8 +156,33 @@ df$trip_id<-paste(df$device_id,df$date)
 #See Sup. Mat.XX R Code "Identifying mooring sites"
 
 #3) From logbook data 
+log_book <- read.csv("log_data.csv")
 
-#See Sup. Mat.XX R Code "Identifying trips from logbook data" - JONATHAN
+setDT(df2)
+setDT(log_book)
+
+#unique trip start and end, with times... (maybe cases for NA needs handling ?)
+trips <- log_book[ ,. (id = unique(log_book_nr)),
+               by = .(device_id, trip_start, trip_end)]
+
+#use only vessels where we have gps data 
+trips <- trips[trips$device_id %in% df2$device_id, ]
+
+#some formatting for "foverlaps", no duplicate column names allowed, but start and end both set to postime
+df2$start <- df2$time_stamp
+df2$end <- df2$time_stamp
+
+setkey(df2, device_id, start, end)
+setkey(trips, device_id, trip_start, trip_end)
+
+## use the foverlaps function to determine where the times overlaps/ where there is sailing
+df2 <- foverlaps(df2, trips)
+
+# sailing occurs when trip start is not NA/ when an overlap was found
+df2 <- df2[! is.na(df2$trip_start), ]
+
+#make unique trip id
+df2$trip_id <- paste0(df2$device_id, df2$id)
 
 ```
 
